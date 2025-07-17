@@ -4,7 +4,6 @@
 #include <libqalculate/Variable.h>
 #include <libqalculate/includes.h>
 #include <lua5.1/lua.hpp>
-#include <unordered_map>
 
 static inline void push_cppstr(lua_State* L, const std::string& str) { lua_pushlstring(L, str.data(), str.size()); }
 
@@ -15,6 +14,7 @@ static std::string check_cppstr(lua_State* L, int index) {
 }
 
 struct Options {
+    bool do_assignment;
     struct PrintOptions print;
     struct ParseOptions parse;
     struct EvaluationOptions eval;
@@ -51,7 +51,7 @@ static inline int table_tointeger(lua_State* L, int index, char const* field, in
 
 static inline std::string table_tostring(lua_State* L, int index, char const* field, std::string const& def) {
     lua_getfield(L, index, field);
-    if (lua_type(L, -1) == LUA_TSTRING) {
+    if (lua_type(L, -1) != LUA_TSTRING) {
         lua_remove(L, -1);
         return def;
     } else {
@@ -61,20 +61,32 @@ static inline std::string table_tostring(lua_State* L, int index, char const* fi
     }
 }
 
-static inline int table_toenum(lua_State* L, int index, char const* field, std::unordered_map<std::string, int> map,
-                               int def) {
+struct EnumPair {
+    const char* key;
+    int value;
+};
+
+static inline int table_toenum(lua_State* L, int index, char const* field, EnumPair keys[], int def) {
     lua_getfield(L, index, field);
-    if (lua_type(L, -1) == LUA_TSTRING) {
+    if (lua_type(L, -1) != LUA_TSTRING) {
         lua_remove(L, -1);
         return def;
     } else {
-        size_t len;
-        const char* buf = lua_tolstring(L, -1, &len);
-        return map[std::string(buf, len)] ?: def;
+        const char* key = lua_tostring(L, -1);
+
+        int i = 0;
+        while (keys[i].key) {
+            if (strcmp(keys[i].key, key) == 0) {
+                return keys[i].value;
+            }
+            i++;
+        }
     }
+
+    return def;
 }
 
-std::unordered_map<std::string, int> IntDisplaySwitch = {
+EnumPair IntDisplaySwitch[] = {
     {"adaptive", -1},
     {"significant", INTERVAL_DISPLAY_SIGNIFICANT_DIGITS},
     {"interval", INTERVAL_DISPLAY_INTERVAL},
@@ -84,6 +96,7 @@ std::unordered_map<std::string, int> IntDisplaySwitch = {
     {"upper", INTERVAL_DISPLAY_UPPER},
     {"concise", INTERVAL_DISPLAY_CONCISE},
     {"relative", INTERVAL_DISPLAY_RELATIVE},
+    {NULL, 0},
 };
 
 static Options* check_Options(lua_State* L, int index) {
@@ -99,6 +112,7 @@ static Options* check_Options(lua_State* L, int index) {
         return opts;
     }
 
+    opts->do_assignment = table_toboolean(L, index, "assing_variables", true);
     opts->print.base = table_tointeger(L, index, "base", 10);
     opts->print.use_unicode_signs = table_toboolean(L, index, "unicode", true);
     opts->print.negative_exponents = table_toboolean(L, index, "negative_exponents", false);
@@ -127,7 +141,14 @@ static void push_MathStructure(lua_State* L, MathStructure const& st, struct Opt
         lua_setfield(L, -2, "number");
     }
 
-    if (st.isVector()) {
+    if (st.isMatrix()) {
+        lua_newtable(L);
+        for (int i = 0; i < st.countChildren(); i++) {
+            push_MathStructure(L, st[i], opts);
+            lua_rawseti(L, -2, i + 1);
+        }
+        lua_setfield(L, -2, "matrix");
+    } else if (st.isVector()) {
         lua_newtable(L);
         for (int i = 0; i < st.countChildren(); i++) {
             push_MathStructure(L, st[i], opts);
@@ -160,16 +181,25 @@ int l_calc_new(lua_State* L) {
     return 1;
 }
 
+int l_calc_set_opts(lua_State* L) {
+    LCalculator* calc = check_Calculator(L, 1);
+    Options* opts = check_Options(L, 2);
+    delete calc->opts;
+    calc->opts = opts;
+
+    return 0;
+}
+
 // TODO/FIXME: fix garbage collection double frees/crashes
 int l_calc_gc(lua_State* L) {
     LCalculator* self = check_Calculator(L, 1);
     if (self->calc) {
         delete self->calc;
-        self->calc = nullptr;
+        // self->calc = nullptr;
     }
     if (self->opts) {
         delete self->opts;
-        self->opts = nullptr;
+        // self->opts = nullptr;
     }
     return 0;
 }
@@ -178,8 +208,12 @@ int l_calc_eval(lua_State* L) {
     LCalculator* self = check_Calculator(L, 1);
     auto expr = check_cppstr(L, 2);
 
+    if (self->opts->do_assignment) {
+        transform_expression_for_equals_save(expr, self->opts->parse);
+    }
+
     MathStructure parsed;
-    auto res = self->calc->calculate(expr, self->opts->eval, &parsed);
+    MathStructure res = self->calc->calculate(expr, self->opts->eval, &parsed);
     push_MathStructure(L, res, self->opts);
 
     push_cppstr(L, parsed.print(self->opts->print));
@@ -233,14 +267,14 @@ int luaopen_qalc(lua_State* L) {
     lua_pushcfunction(L, l_calc_reset);
     lua_setfield(L, -2, "reset");
 
+    lua_pushcfunction(L, l_calc_set_opts);
+    lua_setfield(L, -2, "set_options");
+
     static luaL_Reg const library[] = {
         {"new", l_calc_new},
         {NULL, NULL},
     };
     luaL_register(L, "qalc", library);
-
-    l_calc_new(L);
-    lua_setfield(L, -2, "default");
 
     return 1;
 }
