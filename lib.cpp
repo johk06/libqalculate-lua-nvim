@@ -8,7 +8,7 @@
 
 static inline void push_cppstr(lua_State* L, const std::string& str) { lua_pushlstring(L, str.data(), str.size()); }
 
-static std::string check_cppstr(lua_State* L, int index) {
+static inline std::string check_cppstr(lua_State* L, int index) {
     size_t len;
     const char* str = luaL_checklstring(L, index, &len);
     return std::string(str, len);
@@ -40,35 +40,32 @@ static LMathStructure* check_MathStructure(lua_State* L, int index) {
     return (LMathStructure*)luaL_checkudata(L, index, "QalcExpression");
 }
 
-static inline bool table_toboolean(lua_State* L, int index, char const* field, bool def) {
+static inline void table_getboolean(lua_State* L, int index, bool* dest, char const* field) {
     lua_getfield(L, index, field);
     if (lua_type(L, -1) == LUA_TNIL) {
         lua_remove(L, -1);
-        return def;
     } else {
-        return lua_toboolean(L, -1);
+        *dest = lua_toboolean(L, -1);
     }
 }
 
-static inline int table_tointeger(lua_State* L, int index, char const* field, int def) {
+static inline void table_getinteger(lua_State* L, int index, int* dest, char const* field) {
     lua_getfield(L, index, field);
     if (lua_type(L, -1) == LUA_TNIL) {
         lua_remove(L, -1);
-        return def;
     } else {
-        return lua_tointeger(L, -1);
+        *dest = lua_tointeger(L, -1);
     }
 }
 
-static inline std::string table_tostring(lua_State* L, int index, char const* field, std::string const& def) {
+static inline void table_getstring(lua_State* L, int index, std::string* dest, char const* field) {
     lua_getfield(L, index, field);
     if (lua_type(L, -1) != LUA_TSTRING) {
         lua_remove(L, -1);
-        return def;
     } else {
         size_t len;
         const char* buf = lua_tolstring(L, -1, &len);
-        return std::string(buf, len);
+        *dest = std::string(buf, len);
     }
 }
 
@@ -77,27 +74,24 @@ struct EnumPair {
     int value;
 };
 
-static inline int table_toenum(lua_State* L, int index, char const* field, EnumPair keys[], int def) {
+static inline void table_getenum(lua_State* L, int index, int* dest, char const* field, EnumPair keys[]) {
     lua_getfield(L, index, field);
     if (lua_type(L, -1) != LUA_TSTRING) {
         lua_remove(L, -1);
-        return def;
     } else {
         const char* key = lua_tostring(L, -1);
 
         int i = 0;
         while (keys[i].key) {
             if (strcmp(keys[i].key, key) == 0) {
-                return keys[i].value;
+                *dest = keys[i].value;
             }
             i++;
         }
     }
-
-    return def;
 }
 
-EnumPair IntDisplaySwitch[] = {
+EnumPair interval_display_options[] = {
     {"adaptive", -1},
     {"significant", INTERVAL_DISPLAY_SIGNIFICANT_DIGITS},
     {"interval", INTERVAL_DISPLAY_INTERVAL},
@@ -107,7 +101,14 @@ EnumPair IntDisplaySwitch[] = {
     {"upper", INTERVAL_DISPLAY_UPPER},
     {"concise", INTERVAL_DISPLAY_CONCISE},
     {"relative", INTERVAL_DISPLAY_RELATIVE},
-    {NULL, 0},
+    {NULL},
+};
+
+EnumPair unicode_sign_options[] = {
+    {"on", true},
+    {"off", false},
+    {"no-exponent", UNICODE_SIGNS_WITHOUT_EXPONENTS},
+    {NULL},
 };
 
 static Options* check_Options(lua_State* L, int index) {
@@ -123,16 +124,15 @@ static Options* check_Options(lua_State* L, int index) {
         return opts;
     }
 
-    opts->do_assignment = table_toboolean(L, index, "assing_variables", true);
-    opts->print.base = table_tointeger(L, index, "base", 10);
-    opts->print.use_unicode_signs = table_toboolean(L, index, "unicode", true);
-    opts->print.negative_exponents = table_toboolean(L, index, "negative_exponents", false);
-    opts->print.spacious = table_toboolean(L, index, "spacing", true);
-    opts->print.excessive_parenthesis = table_toboolean(L, index, "extra_parens", false);
-    opts->print.min_decimals = table_tointeger(L, index, "min_decimals", 0);
-    opts->print.max_decimals = table_tointeger(L, index, "max_decimals", -1);
-    opts->print.interval_display =
-        (IntervalDisplay)table_toenum(L, index, "interval_display", IntDisplaySwitch, INTERVAL_DISPLAY_PLUSMINUS);
+    table_getboolean(L, index, &opts->do_assignment, "assign_variables");
+    table_getinteger(L, index, &opts->print.base, "base");
+    table_getboolean(L, index, &opts->print.negative_exponents, "negative_exponents");
+    table_getboolean(L, index, &opts->print.spacious, "spacing");
+    table_getboolean(L, index, &opts->print.excessive_parenthesis, "extra_parens");
+    table_getinteger(L, index, &opts->print.min_decimals, "min_decimals");
+    table_getinteger(L, index, &opts->print.max_decimals, "max_decimals");
+    table_getenum(L, index, (int*)&opts->print.interval_display, "interval_display", interval_display_options);
+    table_getenum(L, index, &opts->print.use_unicode_signs, "unicode", unicode_sign_options);
 
     return opts;
 }
@@ -184,11 +184,7 @@ static int push_MathStructureValue(lua_State* L, MathStructure const& expr, LCal
     return 1;
 }
 
-static int MessageToVimLogLevels[] = {
-    2,
-    3,
-    4,
-};
+static int message_to_vim_log_levels = 2;
 
 extern "C" {
 #include <lua5.1/lauxlib.h>
@@ -219,7 +215,6 @@ int l_calc_set_opts(lua_State* L) {
     return 0;
 }
 
-// TODO/FIXME: fix garbage collection double frees/crashes
 int l_calc_gc(lua_State* L) {
     LCalculator* self = check_Calculator(L, 1);
     if (self->calc) {
@@ -249,8 +244,24 @@ int l_calc_eval(lua_State* L) {
     res->expr = new MathStructure;
     res->parsed_src = new MathStructure;
     *res->expr = self->calc->calculate(expr, self->opts->eval, res->parsed_src);
+    
+    lua_newtable(L);
+    int i = 1;
+    while (auto msg = self->calc->message()) {
+        lua_newtable(L);
 
-    return 1;
+        push_cppstr(L, msg->message());
+        lua_rawseti(L, -2, 1);
+
+        lua_pushinteger(L, msg->type() + message_to_vim_log_levels);
+        lua_rawseti(L, -2, 2);
+
+        self->calc->nextMessage();
+
+        lua_rawseti(L, -2, i++);
+    }
+
+    return 2;
 }
 
 int l_calc_reset(lua_State* L) {
@@ -376,6 +387,9 @@ int luaopen_qalculate_qalc(lua_State* L) {
 
     lua_pushcfunction(L, l_expr_length);
     lua_setfield(L, -2, "__len");
+
+    lua_pushcfunction(L, l_expr_tostring);
+    lua_setfield(L, -2, "print");
 
     lua_pushcfunction(L, l_expr_tolua);
     lua_setfield(L, -2, "value");
