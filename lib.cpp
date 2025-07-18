@@ -333,19 +333,8 @@ int l_expr_index(lua_State* L) {
         luaL_getmetatable(L, "QalcExpression");
         lua_pushvalue(L, 2);
         lua_rawget(L, -2);
-    } else if (type == LUA_TNUMBER) {
-        long key = luaL_checkinteger(L, 2) - 1;
-        if (key < 0 || key > expr->expr->countChildren()) {
-            lua_pushnil(L);
-        } else {
-            LMathStructure* res = (LMathStructure*)lua_newuserdata(L, sizeof(LMathStructure));
-            luaL_getmetatable(L, "QalcExpression");
-            lua_setmetatable(L, -2);
-
-            res->calc = expr->calc;
-            res->expr = new MathStructure(*expr->expr->getChild(key));
-            res->parsed_src = nullptr;
-        }
+    } else {
+        lua_pushnil(L);
     }
 
     return 1;
