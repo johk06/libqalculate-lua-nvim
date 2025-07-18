@@ -207,10 +207,10 @@ int l_calc_new(lua_State* L) {
 }
 
 int l_calc_set_opts(lua_State* L) {
-    LCalculator* calc = check_Calculator(L, 1);
+    LCalculator* self = check_Calculator(L, 1);
     Options* opts = check_Options(L, 2);
-    delete calc->opts;
-    calc->opts = opts;
+    delete self->opts;
+    self->opts = opts;
 
     return 0;
 }
@@ -244,7 +244,7 @@ int l_calc_eval(lua_State* L) {
     res->expr = new MathStructure;
     res->parsed_src = new MathStructure;
     *res->expr = self->calc->calculate(expr, self->opts->eval, res->parsed_src);
-    
+
     lua_newtable(L);
     int i = 1;
     while (auto msg = self->calc->message()) {
@@ -285,25 +285,25 @@ int l_expr_gc(lua_State* L) {
 }
 
 int l_expr_tostring(lua_State* L) {
-    LMathStructure* expr = check_MathStructure(L, 1);
+    LMathStructure* self = check_MathStructure(L, 1);
 
-    std::string s = expr->expr->print(expr->calc->opts->print);
+    std::string s = self->expr->print(self->calc->opts->print);
     push_cppstr(L, s);
 
     return 1;
 }
 
 int l_expr_tolua(lua_State* L) {
-    LMathStructure* expr = check_MathStructure(L, 1);
-    MathStructure* res = expr->expr;
+    LMathStructure* self = check_MathStructure(L, 1);
+    MathStructure* res = self->expr;
 
-    return push_MathStructureValue(L, *res, expr->calc);
+    return push_MathStructureValue(L, *res, self->calc);
 }
 
 int l_expr_source(lua_State* L) {
-    LMathStructure* expr = check_MathStructure(L, 1);
-    if (expr->parsed_src) {
-        push_cppstr(L, expr->parsed_src->print(expr->calc->opts->print));
+    LMathStructure* self = check_MathStructure(L, 1);
+    if (self->parsed_src) {
+        push_cppstr(L, self->parsed_src->print(self->calc->opts->print));
     } else {
         lua_pushnil(L);
     }
@@ -312,38 +312,47 @@ int l_expr_source(lua_State* L) {
 }
 
 int l_expr_type(lua_State* L) {
-    LMathStructure* expr = check_MathStructure(L, 1);
+    LMathStructure* self = check_MathStructure(L, 1);
 
-    push_cppstr(L, expr->expr->isMatrix() ? "matrix" : type_names[expr->expr->type()]);
+    push_cppstr(L, self->expr->isMatrix() ? "matrix" : type_names[self->expr->type()]);
     return 1;
 }
 
 int l_expr_is_approximate(lua_State* L) {
-    LMathStructure* expr = check_MathStructure(L, 1);
+    LMathStructure* self = check_MathStructure(L, 1);
 
-    lua_pushboolean(L, expr->expr->isApproximate());
+    lua_pushboolean(L, self->expr->isApproximate());
 
     return 1;
 }
 
-int l_expr_index(lua_State* L) {
-    LMathStructure* expr = check_MathStructure(L, 1);
-    int type = lua_type(L, 2);
-    if (type == LUA_TSTRING) {
-        luaL_getmetatable(L, "QalcExpression");
-        lua_pushvalue(L, 2);
-        lua_rawget(L, -2);
-    } else {
+int l_expr_as_matrix(lua_State* L) {
+    LMathStructure* self = check_MathStructure(L, 1);
+    if (!self->expr->isMatrix()) {
         lua_pushnil(L);
+        return 1;
     }
 
-    return 1;
-}
+    lua_newtable(L);
+    int rows = self->expr->rows();
+    int cols = self->expr->columns();
+    for (int i = 0; i < rows; i++) {
+        lua_newtable(L);
+        for (int j = 0; j < cols; j++) {
+            auto em = self->expr->getElement(i + 1, j + 1);
+            if (em) {
+                LMathStructure* res = (LMathStructure*)lua_newuserdata(L, sizeof(LMathStructure));
+                luaL_getmetatable(L, "QalcExpression");
+                lua_setmetatable(L, -2);
 
-int l_expr_length(lua_State* L) {
-    LMathStructure* expr = check_MathStructure(L, 1);
+                res->calc = self->calc;
+                res->expr = new MathStructure(*em);
+                lua_rawseti(L, -2, j + 1);
+            }
+        }
+        lua_rawseti(L, -2, i + 1);
+    }
 
-    lua_pushinteger(L, expr->expr->countChildren());
     return 1;
 }
 
@@ -365,7 +374,7 @@ int luaopen_qalculate_qalc(lua_State* L) {
     lua_setfield(L, -2, "set_options");
 
     luaL_newmetatable(L, "QalcExpression");
-    lua_pushcfunction(L, l_expr_index);
+    lua_pushvalue(L, -1);
     lua_setfield(L, -2, "__index");
 
     lua_pushcfunction(L, l_expr_gc);
@@ -373,9 +382,6 @@ int luaopen_qalculate_qalc(lua_State* L) {
 
     lua_pushcfunction(L, l_expr_tostring);
     lua_setfield(L, -2, "__tostring");
-
-    lua_pushcfunction(L, l_expr_length);
-    lua_setfield(L, -2, "__len");
 
     lua_pushcfunction(L, l_expr_tostring);
     lua_setfield(L, -2, "print");
@@ -391,6 +397,9 @@ int luaopen_qalculate_qalc(lua_State* L) {
 
     lua_pushcfunction(L, l_expr_is_approximate);
     lua_setfield(L, -2, "is_approximate");
+
+    lua_pushcfunction(L, l_expr_as_matrix);
+    lua_setfield(L, -2, "as_matrix");
 
     static luaL_Reg const library[] = {
         {"new", l_calc_new},

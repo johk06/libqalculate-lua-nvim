@@ -26,6 +26,7 @@ error("Cannot require a meta file")
 ---@field type fun(self: QalcExpression): QalcType
 ---@field source fun(self: QalcExpression): string?
 ---@field is_approximate fun(self: QalcExpression): boolean
+---@field as_matrix fun(self: QalcExpression): QalcExpression[][]?
 
 --- Regular Number | Vector | Matrix | Expression
 ---@alias QalcValue number|number[]|number[][]|{[1]: QalcType, [integer]: QalcValue}
