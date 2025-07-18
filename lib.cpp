@@ -347,7 +347,7 @@ int l_expr_length(lua_State* L) {
     return 1;
 }
 
-int luaopen_qalc(lua_State* L) {
+int luaopen_qalculate_qalc(lua_State* L) {
     luaL_newmetatable(L, "QalcCalculator");
     lua_pushvalue(L, -1);
     lua_setfield(L, -2, "__index");
