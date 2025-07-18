@@ -43,6 +43,7 @@ error("Cannot require a meta file")
 ---|"function"
 ---|"variable"
 ---|"vector"
+---|"matrix"
 ---|"bitand"
 ---|"bitor"
 ---|"bitxor"

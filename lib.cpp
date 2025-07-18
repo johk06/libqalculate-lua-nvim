@@ -314,7 +314,7 @@ int l_expr_source(lua_State* L) {
 int l_expr_type(lua_State* L) {
     LMathStructure* expr = check_MathStructure(L, 1);
 
-    push_cppstr(L, type_names[expr->expr->type()]);
+    push_cppstr(L, expr->expr->isMatrix() ? "matrix" : type_names[expr->expr->type()]);
     return 1;
 }
 
