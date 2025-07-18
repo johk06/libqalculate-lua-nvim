@@ -1,2 +1,2 @@
-qalc.so: qalc.cpp
+lua/qalc.so: qalc.cpp
 	g++ $< -shared -fPIC -o $@ -lqalculate

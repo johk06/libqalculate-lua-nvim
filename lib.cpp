@@ -1,4 +1,5 @@
 #include <libqalculate/Calculator.h>
+#include <libqalculate/ExpressionItem.h>
 #include <libqalculate/MathStructure.h>
 #include <libqalculate/Unit.h>
 #include <libqalculate/Variable.h>
@@ -25,8 +26,18 @@ struct LCalculator {
     Options* opts;
 };
 
+struct LMathStructure {
+    MathStructure* expr;
+    MathStructure* parsed_src; // nullable
+    LCalculator* calc;
+};
+
 static LCalculator* check_Calculator(lua_State* L, int index) {
-    return (LCalculator*)luaL_checkudata(L, index, "QalculatorMT");
+    return (LCalculator*)luaL_checkudata(L, index, "QalcCalculator");
+}
+
+static LMathStructure* check_MathStructure(lua_State* L, int index) {
+    return (LMathStructure*)luaL_checkudata(L, index, "QalcExpression");
 }
 
 static inline bool table_toboolean(lua_State* L, int index, char const* field, bool def) {
@@ -126,40 +137,58 @@ static Options* check_Options(lua_State* L, int index) {
     return opts;
 }
 
+std::string type_names[] = {
+    "multiplication", "inverse",  "division", "addition", "negation",   "power",     "number",  "unit",
+    "symbolic",       "function", "variable", "vector",   "bitand",     "bitor",     "bitxor",  "bitnot",
+    "logand",         "logor",    "logxor",   "lognot",   "comparison", "undefined", "aborted", "datetime",
+};
+
+static int push_MathStructureValue(lua_State* L, MathStructure const& expr, LCalculator const* calc) {
+    if (expr.isNumber()) {
+        lua_pushnumber(L, expr.number().floatValue());
+        return 1;
+    }
+
+    if (expr.isVector()) {
+        lua_newtable(L);
+
+        for (int i = 0; i < expr.countChildren(); i++) {
+            push_MathStructureValue(L, expr[i], calc);
+            lua_rawseti(L, -2, i + 1);
+        }
+
+        return 1;
+    }
+
+    lua_newtable(L);
+    int i = 0;
+    push_cppstr(L, type_names[expr.type()]);
+    lua_rawseti(L, -2, i++ + 1);
+
+    if (expr.isUnit()) {
+        push_cppstr(L, expr.unit()->singular());
+        lua_rawseti(L, -2, i++ + 1);
+
+        push_cppstr(L, expr.unit()->abbreviation());
+        lua_rawseti(L, -2, i++ + 1);
+    } else if (expr.isVariable() || expr.isSymbolic()) {
+        push_cppstr(L, expr.print(calc->opts->print));
+        lua_rawseti(L, -2, i++ + 1);
+    } else {
+        for (; (i - 1) < expr.countChildren(); i++) {
+            push_MathStructureValue(L, expr[i - 1], calc);
+            lua_rawseti(L, -2, i + 1);
+        }
+    }
+
+    return 1;
+}
+
 static int MessageToVimLogLevels[] = {
     2,
     3,
     4,
 };
-
-static void push_MathStructure(lua_State* L, MathStructure const& st, struct Options const* opts) {
-    lua_newtable(L);
-
-    if (st.isNumber()) {
-        auto as_number = st.number().floatValue();
-        lua_pushnumber(L, as_number);
-        lua_setfield(L, -2, "number");
-    }
-
-    if (st.isMatrix()) {
-        lua_newtable(L);
-        for (int i = 0; i < st.countChildren(); i++) {
-            push_MathStructure(L, st[i], opts);
-            lua_rawseti(L, -2, i + 1);
-        }
-        lua_setfield(L, -2, "matrix");
-    } else if (st.isVector()) {
-        lua_newtable(L);
-        for (int i = 0; i < st.countChildren(); i++) {
-            push_MathStructure(L, st[i], opts);
-            lua_rawseti(L, -2, i + 1);
-        }
-        lua_setfield(L, -2, "vector");
-    }
-
-    push_cppstr(L, st.print(opts->print));
-    lua_setfield(L, -2, "string");
-}
 
 extern "C" {
 #include <lua5.1/lauxlib.h>
@@ -176,7 +205,7 @@ int l_calc_new(lua_State* L) {
     calc->loadGlobalDefinitions();
     calc->loadLocalDefinitions();
 
-    luaL_getmetatable(L, "QalculatorMT");
+    luaL_getmetatable(L, "QalcCalculator");
     lua_setmetatable(L, -2);
     return 1;
 }
@@ -195,11 +224,11 @@ int l_calc_gc(lua_State* L) {
     LCalculator* self = check_Calculator(L, 1);
     if (self->calc) {
         delete self->calc;
-        // self->calc = nullptr;
+        self->calc = NULL;
     }
     if (self->opts) {
         delete self->opts;
-        // self->opts = nullptr;
+        self->opts = NULL;
     }
     return 0;
 }
@@ -212,30 +241,15 @@ int l_calc_eval(lua_State* L) {
         transform_expression_for_equals_save(expr, self->opts->parse);
     }
 
-    MathStructure parsed;
-    MathStructure res = self->calc->calculate(expr, self->opts->eval, &parsed);
-    push_MathStructure(L, res, self->opts);
+    LMathStructure* res = (LMathStructure*)lua_newuserdata(L, sizeof(LMathStructure));
+    luaL_getmetatable(L, "QalcExpression");
+    lua_setmetatable(L, -2);
 
-    push_cppstr(L, parsed.print(self->opts->print));
-    lua_setfield(L, -2, "parsed");
+    res->calc = self;
+    res->expr = new MathStructure;
+    res->parsed_src = new MathStructure;
+    *res->expr = self->calc->calculate(expr, self->opts->eval, res->parsed_src);
 
-    lua_newtable(L);
-    int i = 1;
-    while (auto msg = self->calc->message()) {
-        std::string text = msg->message();
-        MessageType type = msg->type();
-        lua_newtable(L);
-
-        push_cppstr(L, text);
-        lua_rawseti(L, -2, 1);
-        lua_pushinteger(L, MessageToVimLogLevels[type]);
-        lua_rawseti(L, -2, 2);
-
-        lua_rawseti(L, -2, i++);
-
-        self->calc->nextMessage();
-    }
-    lua_setfield(L, -2, "messages");
     return 1;
 }
 
@@ -251,15 +265,95 @@ int l_calc_reset(lua_State* L) {
     return 0;
 }
 
+int l_expr_gc(lua_State* L) {
+    LMathStructure* expr = check_MathStructure(L, 1);
+
+    delete expr->expr;
+
+    return 0;
+}
+
+int l_expr_tostring(lua_State* L) {
+    LMathStructure* expr = check_MathStructure(L, 1);
+
+    std::string s = expr->expr->print(expr->calc->opts->print);
+    push_cppstr(L, s);
+
+    return 1;
+}
+
+int l_expr_tolua(lua_State* L) {
+    LMathStructure* expr = check_MathStructure(L, 1);
+    MathStructure* res = expr->expr;
+
+    return push_MathStructureValue(L, *res, expr->calc);
+}
+
+int l_expr_source(lua_State* L) {
+    LMathStructure* expr = check_MathStructure(L, 1);
+    if (expr->parsed_src) {
+        push_cppstr(L, expr->parsed_src->print(expr->calc->opts->print));
+    } else {
+        lua_pushnil(L);
+    }
+
+    return 1;
+}
+
+int l_expr_type(lua_State* L) {
+    LMathStructure* expr = check_MathStructure(L, 1);
+
+    push_cppstr(L, type_names[expr->expr->type()]);
+    return 1;
+}
+
+int l_expr_is_approximate(lua_State* L) {
+    LMathStructure* expr = check_MathStructure(L, 1);
+
+    lua_pushboolean(L, expr->expr->isApproximate());
+
+    return 1;
+}
+
+int l_expr_index(lua_State* L) {
+    LMathStructure* expr = check_MathStructure(L, 1);
+    int type = lua_type(L, 2);
+    if (type == LUA_TSTRING) {
+        luaL_getmetatable(L, "QalcExpression");
+        lua_pushvalue(L, 2);
+        lua_rawget(L, -2);
+    } else if (type == LUA_TNUMBER) {
+        long key = luaL_checkinteger(L, 2) - 1;
+        if (key < 0 || key > expr->expr->countChildren()) {
+            lua_pushnil(L);
+        } else {
+            LMathStructure* res = (LMathStructure*)lua_newuserdata(L, sizeof(LMathStructure));
+            luaL_getmetatable(L, "QalcExpression");
+            lua_setmetatable(L, -2);
+
+            res->calc = expr->calc;
+            res->expr = new MathStructure(*expr->expr->getChild(key));
+            res->parsed_src = nullptr;
+        }
+    }
+
+    return 1;
+}
+
+int l_expr_length(lua_State* L) {
+    LMathStructure* expr = check_MathStructure(L, 1);
+
+    lua_pushinteger(L, expr->expr->countChildren());
+    return 1;
+}
+
 int luaopen_qalc(lua_State* L) {
-    luaL_newmetatable(L, "QalculatorMT");
+    luaL_newmetatable(L, "QalcCalculator");
+    lua_pushvalue(L, -1);
+    lua_setfield(L, -2, "__index");
 
     lua_pushcfunction(L, l_calc_gc);
     lua_setfield(L, -2, "__gc");
-
-    // Index with self
-    lua_pushvalue(L, -1);
-    lua_setfield(L, -2, "__index");
 
     lua_pushcfunction(L, l_calc_eval);
     lua_setfield(L, -2, "eval");
@@ -269,6 +363,31 @@ int luaopen_qalc(lua_State* L) {
 
     lua_pushcfunction(L, l_calc_set_opts);
     lua_setfield(L, -2, "set_options");
+
+    luaL_newmetatable(L, "QalcExpression");
+    lua_pushcfunction(L, l_expr_index);
+    lua_setfield(L, -2, "__index");
+
+    lua_pushcfunction(L, l_expr_gc);
+    lua_setfield(L, -2, "__gc");
+
+    lua_pushcfunction(L, l_expr_tostring);
+    lua_setfield(L, -2, "__tostring");
+
+    lua_pushcfunction(L, l_expr_length);
+    lua_setfield(L, -2, "__len");
+
+    lua_pushcfunction(L, l_expr_tolua);
+    lua_setfield(L, -2, "value");
+
+    lua_pushcfunction(L, l_expr_type);
+    lua_setfield(L, -2, "type");
+
+    lua_pushcfunction(L, l_expr_source);
+    lua_setfield(L, -2, "source");
+
+    lua_pushcfunction(L, l_expr_is_approximate);
+    lua_setfield(L, -2, "is_approximate");
 
     static luaL_Reg const library[] = {
         {"new", l_calc_new},
