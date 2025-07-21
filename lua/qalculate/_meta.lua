@@ -27,6 +27,8 @@ error("Cannot require a meta file")
 ---@field eval fun(self: QalcCalculator, expr: string, parse_opts: QalcParseOptions?, allow_assingment: boolean?): QalcExpression, QalcMessages?
 ---@field plot fun(self: QalcCalculator, expr: string, min: QalcInput, max: QalcInput, step: QalcInput, parse_opts: QalcParseOptions?): number[]
 ---@field reset fun(self: QalcCalculator, variables: boolean, functions: boolean)
+---@field get fun(self: QalcCalculator, name: string): QalcExpression
+---@field set fun(self: QalcCalculator, name: string, value: QalcInput): boolean
 
 ---@class QalcExpression
 ---@field print fun(self: QalcExpression, opts: QalcPrintOptions?): string, QalcMessages?
@@ -39,7 +41,7 @@ error("Cannot require a meta file")
 --- Regular Number | Vector | Matrix | Expression
 ---@alias QalcValue number|number[]|number[][]|{[1]: QalcType, [integer]: QalcValue}
 
----@alias QalcInput string|number
+---@alias QalcInput string|number|QalcExpression
 
 ---@alias QalcType
 ---|"multiplication"

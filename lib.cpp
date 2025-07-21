@@ -14,6 +14,12 @@ static inline std::string check_cppstr(lua_State* L, int index) {
     return std::string(str, len);
 }
 
+struct LMathStructure {
+    MathStructure* expr;
+    MathStructure* parsed_src; // nullable
+    Calculator* calc;
+};
+
 static MathStructure check_MathValue(Calculator* calc, lua_State* L, int index) {
     int type = lua_type(L, index);
     switch (type) {
@@ -21,24 +27,17 @@ static MathStructure check_MathValue(Calculator* calc, lua_State* L, int index) 
         return Number(luaL_checknumber(L, index));
     case LUA_TSTRING:
         return calc->parse(check_cppstr(L, index));
+    case LUA_TUSERDATA:
+        return *((LMathStructure*)luaL_checkudata(L, index, "QalcExpression"))->expr;
+        break;
     default:
         luaL_argerror(L, index, "Must be a number or string");
         return MathStructure();
     }
 }
 
-struct LCalculator {
-    Calculator* calc;
-};
-
-struct LMathStructure {
-    MathStructure* expr;
-    MathStructure* parsed_src; // nullable
-    LCalculator* calc;
-};
-
-static LCalculator* check_Calculator(lua_State* L, int index) {
-    return (LCalculator*)luaL_checkudata(L, index, "QalcCalculator");
+static Calculator* check_Calculator(lua_State* L, int index) {
+    return (Calculator*)luaL_checkudata(L, index, "QalcCalculator");
 }
 
 static LMathStructure* check_MathStructure(lua_State* L, int index) {
@@ -178,7 +177,7 @@ const std::string type_names[] = {
     "logand",         "logor",    "logxor",   "lognot",   "comparison", "undefined", "aborted", "datetime",
 };
 
-static int push_MathStructureValue(lua_State* L, MathStructure const& expr, LCalculator const* calc,
+static int push_MathStructureValue(lua_State* L, MathStructure const& expr, Calculator const* calc,
                                    PrintOptions const& opts) {
     if (expr.isNumber()) {
         lua_pushnumber(L, expr.number().floatValue());
@@ -250,9 +249,8 @@ extern "C" {
 #include <lua5.1/lua.h>
 
 int l_calc_new(lua_State* L) {
-    Calculator* calc = new Calculator();
-    LCalculator* udata = (LCalculator*)lua_newuserdata(L, sizeof(LCalculator));
-    udata->calc = calc;
+    void* mem = lua_newuserdata(L, sizeof(Calculator));
+    Calculator* calc = new (mem) Calculator;
 
     calc->loadExchangeRates();
     calc->loadGlobalDefinitions();
@@ -264,17 +262,13 @@ int l_calc_new(lua_State* L) {
 }
 
 int l_calc_gc(lua_State* L) {
-    LCalculator* self = check_Calculator(L, 1);
-
-    if (self->calc != NULL) {
-        delete self->calc;
-        self->calc = NULL;
-    }
+    Calculator* calc = check_Calculator(L, 1);
+    calc->~Calculator();
     return 0;
 }
 
 int l_calc_eval(lua_State* L) {
-    LCalculator* self = check_Calculator(L, 1);
+    Calculator* calc = check_Calculator(L, 1);
     auto expr = check_cppstr(L, 2);
     ParseOptions opts = check_ParseOptions(L, 3);
     EvaluationOptions eopts = default_evaluation_options;
@@ -289,25 +283,25 @@ int l_calc_eval(lua_State* L) {
     luaL_getmetatable(L, "QalcExpression");
     lua_setmetatable(L, -2);
 
-    res->calc = self;
+    res->calc = calc;
     res->expr = new MathStructure;
     res->parsed_src = new MathStructure;
-    *res->expr = self->calc->calculate(expr, eopts, res->parsed_src);
+    *res->expr = calc->calculate(expr, eopts, res->parsed_src);
 
-    return 1 + push_messages(L, self->calc);
+    return 1 + push_messages(L, calc);
 }
 
 int l_calc_get_plot_values(lua_State* L) {
-    LCalculator* self = check_Calculator(L, 1);
+    Calculator* calc = check_Calculator(L, 1);
 
     std::string code = check_cppstr(L, 2);
 
-    MathStructure min = check_MathValue(self->calc, L, 3);
-    MathStructure max = check_MathValue(self->calc, L, 4);
-    MathStructure step = check_MathValue(self->calc, L, 5);
+    MathStructure min = check_MathValue(calc, L, 3);
+    MathStructure max = check_MathValue(calc, L, 4);
+    MathStructure step = check_MathValue(calc, L, 5);
     ParseOptions opts = check_ParseOptions(L, 6);
 
-    MathStructure expr = self->calc->parse(code, opts);
+    MathStructure expr = calc->parse(code, opts);
 
     min.eval();
     max.eval();
@@ -321,7 +315,7 @@ int l_calc_get_plot_values(lua_State* L) {
     }
 
     MathStructure x_value(min);
-    MathStructure x_var = self->calc->v_x;
+    MathStructure x_var = calc->v_x;
     lua_newtable(L);
 
     MathStructure y_value;
@@ -348,8 +342,52 @@ int l_calc_get_plot_values(lua_State* L) {
     return 1;
 }
 
+int l_calc_getvar(lua_State* L) {
+    Calculator* self = check_Calculator(L, 1);
+    std::string name = check_cppstr(L, 2);
+
+    Variable* var = self->getActiveVariable(name);
+    if (!var) {
+        lua_pushnil(L);
+    } else {
+        LMathStructure* res = (LMathStructure*)lua_newuserdata(L, sizeof(LMathStructure));
+        luaL_getmetatable(L, "QalcExpression");
+        lua_setmetatable(L, -2);
+
+        res->calc = self;
+        MathStructure* expr = new MathStructure(var);
+        expr->eval();
+        res->expr = expr;
+        res->parsed_src = NULL;
+    }
+
+    return 1;
+}
+
+int l_calc_setvar(lua_State* L) {
+    Calculator* self = check_Calculator(L, 1);
+    std::string name = check_cppstr(L, 2);
+    MathStructure val = check_MathValue(self, L, 3);
+
+    Variable* var = self->getVariable(name);
+    if (!var) {
+        KnownVariable* v = new KnownVariable();
+        v->setName(name);
+        v->set(val);
+        self->addVariable(v);
+        lua_pushboolean(L, true);
+    } else if (var->isKnown()) {
+        KnownVariable* v = (KnownVariable*)var;
+        v->set(val);
+        lua_pushboolean(L, true);
+    }
+
+    lua_pushboolean(L, false);
+    return 1;
+}
+
 int l_calc_reset(lua_State* L) {
-    Calculator* self = check_Calculator(L, 1)->calc;
+    Calculator* self = check_Calculator(L, 1);
     bool variables = lua_toboolean(L, 2);
     bool functions = lua_toboolean(L, 3);
     if (variables)
@@ -368,6 +406,11 @@ int l_expr_gc(lua_State* L) {
         expr->expr = NULL;
     }
 
+    if (expr->parsed_src != NULL) {
+        delete expr->parsed_src;
+        expr->expr = NULL;
+    }
+
     return 0;
 }
 
@@ -377,7 +420,7 @@ int l_expr_tostring(lua_State* L) {
 
     std::string s = self->expr->print(opts);
     push_cppstr(L, s);
-    return 1 + push_messages(L, self->calc->calc);
+    return 1 + push_messages(L, self->calc);
 }
 
 int l_expr_tolua(lua_State* L) {
@@ -459,6 +502,12 @@ int luaopen_qalculate_qalc(lua_State* L) {
 
     lua_pushcfunction(L, l_calc_get_plot_values);
     lua_setfield(L, -2, "plot");
+
+    lua_pushcfunction(L, l_calc_getvar);
+    lua_setfield(L, -2, "get");
+
+    lua_pushcfunction(L, l_calc_setvar);
+    lua_setfield(L, -2, "set");
 
     lua_pushcfunction(L, l_calc_reset);
     lua_setfield(L, -2, "reset");
