@@ -4,7 +4,10 @@
 #include <libqalculate/Unit.h>
 #include <libqalculate/Variable.h>
 #include <libqalculate/includes.h>
+#include <limits>
 #include <lua5.1/lua.hpp>
+
+auto constexpr infini = std::numeric_limits<double>::infinity();
 
 static inline void push_cppstr(lua_State* L, const std::string& str) { lua_pushlstring(L, str.data(), str.size()); }
 
@@ -180,12 +183,28 @@ const std::string type_names[] = {
 static int push_MathStructureValue(lua_State* L, MathStructure const& expr, Calculator const* calc,
                                    PrintOptions const& opts) {
     if (expr.isNumber()) {
-        lua_pushnumber(L, expr.number().floatValue());
+        Number num = expr.number();
+        if (num.isComplex()) {
+            lua_createtable(L, 3, 0);
+
+            push_cppstr(L, "complex");
+            lua_rawseti(L, -2, 1);
+
+            lua_pushnumber(L, num.realPart().floatValue());
+            lua_rawseti(L, -2, 2);
+
+            lua_pushnumber(L, num.imaginaryPart().floatValue());
+            lua_rawseti(L, -2, 3);
+        } else if (num.isInfinite()) {
+            lua_pushnumber(L, num.isPlusInfinity() ? infini : -infini);
+        } else {
+            lua_pushnumber(L, num.floatValue());
+        }
         return 1;
     }
 
     if (expr.isVector()) {
-        lua_newtable(L);
+        lua_createtable(L, expr.countChildren(), 0);
 
         for (int i = 0; i < expr.countChildren(); i++) {
             push_MathStructureValue(L, expr[i], calc, opts);
@@ -316,8 +335,6 @@ int l_calc_get_plot_values(lua_State* L) {
 
     MathStructure x_value(min);
     MathStructure x_var = calc->v_x;
-    lua_newtable(L);
-
     MathStructure y_value;
 
     double maxvalue = max.number().floatValue();
@@ -466,11 +483,11 @@ int l_expr_as_matrix(lua_State* L) {
         return 1;
     }
 
-    lua_newtable(L);
     int rows = self->expr->rows();
     int cols = self->expr->columns();
+    lua_createtable(L, rows, 0);
     for (int i = 0; i < rows; i++) {
-        lua_newtable(L);
+        lua_createtable(L, cols, 0);
         for (int j = 0; j < cols; j++) {
             auto em = self->expr->getElement(i + 1, j + 1);
             if (em) {

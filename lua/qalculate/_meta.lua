@@ -69,3 +69,4 @@ error("Cannot require a meta file")
 ---|"undefined"
 ---|"aborted"
 ---|"datetime"
+---|"complex"
