@@ -91,7 +91,7 @@ static inline void table_getenum(lua_State* L, int index, int* dest, char const*
     }
 }
 
-EnumPair interval_display_options[] = {
+const EnumPair interval_display_options[] = {
     {"adaptive", -1},
     {"significant", INTERVAL_DISPLAY_SIGNIFICANT_DIGITS},
     {"interval", INTERVAL_DISPLAY_INTERVAL},
@@ -104,7 +104,7 @@ EnumPair interval_display_options[] = {
     {NULL},
 };
 
-EnumPair unicode_sign_options[] = {
+const EnumPair unicode_sign_options[] = {
     {"on", true},
     {"off", false},
     {"no-exponent", UNICODE_SIGNS_WITHOUT_EXPONENTS},
@@ -137,7 +137,7 @@ static Options* check_Options(lua_State* L, int index) {
     return opts;
 }
 
-std::string type_names[] = {
+const std::string type_names[] = {
     "multiplication", "inverse",  "division", "addition", "negation",   "power",     "number",  "unit",
     "symbolic",       "function", "variable", "vector",   "bitand",     "bitor",     "bitxor",  "bitnot",
     "logand",         "logor",    "logxor",   "lognot",   "comparison", "undefined", "aborted", "datetime",
@@ -184,7 +184,7 @@ static int push_MathStructureValue(lua_State* L, MathStructure const& expr, LCal
     return 1;
 }
 
-static int message_to_vim_log_levels = 2;
+#define MESSAGE_TO_VIM_LOG_LEVELS 2
 
 extern "C" {
 #include <lua5.1/lauxlib.h>
@@ -253,7 +253,7 @@ int l_calc_eval(lua_State* L) {
         push_cppstr(L, msg->message());
         lua_rawseti(L, -2, 1);
 
-        lua_pushinteger(L, msg->type() + message_to_vim_log_levels);
+        lua_pushinteger(L, msg->type() + MESSAGE_TO_VIM_LOG_LEVELS);
         lua_rawseti(L, -2, 2);
 
         self->calc->nextMessage();
