@@ -1,6 +1,7 @@
 #include <libqalculate/Calculator.h>
 #include <libqalculate/ExpressionItem.h>
 #include <libqalculate/MathStructure.h>
+#include <libqalculate/Number.h>
 #include <libqalculate/Unit.h>
 #include <libqalculate/Variable.h>
 #include <libqalculate/includes.h>
@@ -180,6 +181,16 @@ const std::string type_names[] = {
     "logand",         "logor",    "logxor",   "lognot",   "comparison", "undefined", "aborted", "datetime",
 };
 
+static double num_value(Number const& num) {
+    if (num.isPlusInfinity()) {
+        return infini;
+    } else if (num.isMinusInfinity()) {
+        return -infini;
+    } else {
+        return num.floatValue();
+    }
+}
+
 static int push_MathStructureValue(lua_State* L, MathStructure const& expr, Calculator const* calc,
                                    PrintOptions const& opts) {
     if (expr.isNumber()) {
@@ -190,15 +201,13 @@ static int push_MathStructureValue(lua_State* L, MathStructure const& expr, Calc
             push_cppstr(L, "complex");
             lua_rawseti(L, -2, 1);
 
-            lua_pushnumber(L, num.realPart().floatValue());
+            lua_pushnumber(L, num_value(num.realPart()));
             lua_rawseti(L, -2, 2);
 
-            lua_pushnumber(L, num.imaginaryPart().floatValue());
+            lua_pushnumber(L, num_value(num.imaginaryPart()));
             lua_rawseti(L, -2, 3);
-        } else if (num.isInfinite()) {
-            lua_pushnumber(L, num.isPlusInfinity() ? infini : -infini);
         } else {
-            lua_pushnumber(L, num.floatValue());
+            lua_pushnumber(L, num_value(num));
         }
         return 1;
     }
