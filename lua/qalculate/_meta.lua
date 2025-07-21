@@ -1,37 +1,47 @@
 --- @meta
 error("Cannot require a meta file")
 
----@class QalcOptions
----@field assing_variables boolean?
----@field base integer?
----@field negative_exponents boolean?
----@field spacing boolean?
----@field extra_parens boolean?
+---@alias QalcBase "roman"|"time"|integer
+
+---@class QalcPrintOptions
+---@field base QalcBase?
 ---@field min_decimals boolean?
 ---@field max_decimals boolean?
+---@field abbreviate_names boolean?
+---@field negative_exponents boolean?
+---@field spacious boolean?
+---@field excessive_parenthesis boolean?
 ---@field interval_display "adaptive"| "significant"| "interval"| "plusminus"| "midpoint"| "lower"| "upper"| "concise"| "relative"?
 ---@field unicode "on"|"off"|"no-unit"?
 
+---@class QalcParseOptions
+---@field base QalcBase?
+---@field mode "default"|"rpn"
+
 ---@class Qalculate
----@field new fun(opts: QalcOptions): QalcCalculator
+---@field new fun(): QalcCalculator
+
+---@alias QalcMessages {[1]: string, [2]: vim.log.levels}[]
 
 ---@class QalcCalculator
----@field eval fun(self: QalcCalculator, expr: string): QalcExpression, {[1]: string, [2]: vim.log.levels}[]
+---@field eval fun(self: QalcCalculator, expr: string, parse_opts: QalcParseOptions?, allow_assingment: boolean?): QalcExpression, QalcMessages?
+---@field plot fun(self: QalcCalculator, expr: string, min: QalcInput, max: QalcInput, step: QalcInput, parse_opts: QalcParseOptions?): number[]
 ---@field reset fun(self: QalcCalculator, variables: boolean, functions: boolean)
----@field set_options fun(self: QalcCalculator, opts: QalcOptions)
 
 ---@class QalcExpression
----@field print fun(self: QalcExpression): string
----@field value fun(self: QalcExpression): QalcValue
+---@field print fun(self: QalcExpression, opts: QalcPrintOptions?): string, QalcMessages?
+---@field value fun(self: QalcExpression, opts: QalcPrintOptions?): QalcValue
 ---@field type fun(self: QalcExpression): QalcType
----@field source fun(self: QalcExpression): string?
+---@field source fun(self: QalcExpression, opts: QalcPrintOptions?): string?
 ---@field is_approximate fun(self: QalcExpression): boolean
 ---@field as_matrix fun(self: QalcExpression): QalcExpression[][]?
 
 --- Regular Number | Vector | Matrix | Expression
 ---@alias QalcValue number|number[]|number[][]|{[1]: QalcType, [integer]: QalcValue}
 
----@alias QalcType 
+---@alias QalcInput string|number
+
+---@alias QalcType
 ---|"multiplication"
 ---|"inverse"
 ---|"division"
