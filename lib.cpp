@@ -74,7 +74,7 @@ struct EnumPair {
     int value;
 };
 
-static inline void table_getenum(lua_State* L, int index, int* dest, char const* field, EnumPair keys[]) {
+static inline void table_getenum(lua_State* L, int index, int* dest, char const* field, EnumPair const keys[]) {
     lua_getfield(L, index, field);
     if (lua_type(L, -1) != LUA_TSTRING) {
         lua_remove(L, -1);
