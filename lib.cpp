@@ -31,7 +31,7 @@ struct LMathStructure {
 
 struct LCalculator {
     Calculator* calc;
-    int table_index;
+    int plot_function;
 };
 
 static MathStructure check_MathValue(Calculator* calc, lua_State* L, int index) {
@@ -155,25 +155,31 @@ static int push_messages(lua_State* L, Calculator* calc) {
     return 1;
 }
 
+int QALC_CURRENT_PLOT_HANDLER = 0;
+lua_State* QALC_CURRENT_LUA_STATE = NULL;
+
 extern "C" {
 #include <lua5.1/lua.h>
 #include <lua5.1/lauxlib.h>
 
 int l_calc_new(lua_State* L) {
+    int funcref = 0;
+    if (lua_isfunction(L, 1)) {
+        lua_pushvalue(L, 1);
+        funcref = luaL_ref(L, LUA_REGISTRYINDEX);
+    }
+
     LCalculator* udata = (LCalculator*)lua_newuserdata(L, sizeof(LCalculator));
     Calculator* calc = new Calculator;
     udata->calc = calc;
+    udata->plot_function = funcref;
 
     calc->loadExchangeRates();
     calc->loadGlobalDefinitions();
     calc->loadLocalDefinitions();
 
-    lua_newtable(L);
-    int table_index = luaL_ref(L, LUA_REGISTRYINDEX);
-    udata->table_index = table_index;
-
-    // MathFunction* func = calc->addFunction(new ReturnPlotFunction());
-    // calc->f_plot = NULL;
+    // override builtin plot to call a lua handler
+    MathFunction* func = calc->addFunction(new ReturnPlotFunction());
 
     luaL_getmetatable(L, "QalcCalculator");
     lua_setmetatable(L, -2);
@@ -190,6 +196,10 @@ int l_calc_gc(lua_State* L) {
 
 int l_calc_eval(lua_State* L) {
     LCalculator* self = check_Calculator(L, 1);
+
+    QALC_CURRENT_LUA_STATE = L;
+    QALC_CURRENT_PLOT_HANDLER = self->plot_function;
+
     auto expr = check_cppstr(L, 2);
     ParseOptions opts = check_ParseOptions(L, 3);
     EvaluationOptions eopts = default_evaluation_options;
@@ -209,56 +219,10 @@ int l_calc_eval(lua_State* L) {
     res->parsed_src = new MathStructure;
     *res->expr = self->calc->calculate(expr, eopts, res->parsed_src);
 
+    QALC_CURRENT_LUA_STATE = NULL;
+    QALC_CURRENT_PLOT_HANDLER = 0;
+
     return 1 + push_messages(L, self->calc);
-}
-
-int l_calc_get_plot_values(lua_State* L) {
-    LCalculator* self = check_Calculator(L, 1);
-
-    std::string code = check_cppstr(L, 2);
-
-    MathStructure min = check_MathValue(self->calc, L, 3);
-    MathStructure max = check_MathValue(self->calc, L, 4);
-    MathStructure step = check_MathValue(self->calc, L, 5);
-    ParseOptions opts = check_ParseOptions(L, 6);
-
-    MathStructure expr = self->calc->parse(code, opts);
-
-    min.eval();
-    max.eval();
-    step.eval();
-    if (!step.isNumber() || step.number().isNegative()) {
-        luaL_error(L, "Step must be a number > 0");
-    }
-
-    if (!min.isNumber() || !max.isNumber() || !min.number().isLessThan(max.number())) {
-        luaL_error(L, "Min must be a number < Max");
-    }
-
-    MathStructure x_value(min);
-    MathStructure x_var = self->calc->v_x;
-    MathStructure y_value;
-
-    double maxvalue = max.number().floatValue();
-    size_t i = 1;
-
-    lua_newtable(L);
-    while (x_value.number().isLessThanOrEqualTo(maxvalue)) {
-        y_value = expr;
-        y_value.replace(x_var, x_value);
-        y_value.eval();
-
-        if (!y_value.isNumber()) {
-            luaL_error(L, "Expression did not evaluate to number for x=%f", x_value.number().floatValue());
-        }
-
-        lua_pushnumber(L, y_value.number().floatValue());
-        lua_rawseti(L, -2, i++);
-
-        x_value.calculateAdd(step, default_evaluation_options);
-    }
-
-    return 1;
 }
 
 int l_calc_getvar(lua_State* L) {
@@ -418,9 +382,6 @@ int luaopen_qalculate_qalc(lua_State* L) {
 
     lua_pushcfunction(L, l_calc_eval);
     lua_setfield(L, -2, "eval");
-
-    lua_pushcfunction(L, l_calc_get_plot_values);
-    lua_setfield(L, -2, "plot");
 
     lua_pushcfunction(L, l_calc_getvar);
     lua_setfield(L, -2, "get");

@@ -18,8 +18,10 @@ error("Cannot require a meta file")
 ---@field base QalcBase?
 ---@field mode "default"|"rpn"
 
+---@alias QalcPlotHandler fun(x: number[], y: number[])
+
 ---@class Qalculate
----@field new fun(): QalcCalculator
+---@field new fun(plot: QalcPlotHandler?): QalcCalculator
 
 ---@alias QalcMessages {[1]: string, [2]: vim.log.levels}[]
 

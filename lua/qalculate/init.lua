@@ -7,5 +7,5 @@ local qalc = require("qalculate.qalc")
 
 return {
     new = qalc.new,
-    default = qalc.new {},
+    default = qalc.new(),
 }

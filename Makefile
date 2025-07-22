@@ -5,11 +5,11 @@ OBJ = $(addprefix $(BUILD)/, $(addsuffix .o, $(basename $(SRC))))
 
 $(BUILD)/%.o: %.cpp
 	mkdir -p build
-	$(CXX) -c -fPIC -o $@ $< -lqalculate
+	$(CXX) -c -fPIC -o $@ $< -lqalculate -Wall
 
 
 $(DEST): $(OBJ)
-	g++ -shared $(OBJ) -o $@ -lqalculate
+	g++ -shared $(OBJ) -o $@ -lqalculate -Wall
 
 clean:
 	rm -rf $(BUILD)
