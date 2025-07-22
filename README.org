@@ -14,16 +14,21 @@ object for the whole plugin. Creating a new calculator has a significant
 cost as it reads user initialization files, currencies etc. Clear the
 variables and functions instead of creating a new calculator.
 
+If you only want to do a few simple calculations, using the
+=qalculate.default= calculator might be a good idea too.
+
 *** Minimal example
 #+begin_src lua
-local calculator = require("qalculate").new {
-    -- options for display, evaluation etc go here
-}
+local calculator = require("qalculate").new()
 
 local result = calculator:eval [[integrate(200x * pi^x)]]
+local printopts = {
+    unicode = "on",
+    interval_display = "concise",
+}
 -- returns the pretty printed expression
-local source_text = result:source() 
-local result_text = result:print()
+local source_text = result:source(printopts)
+local result_text = result:print(printopts)
 
 print(string.format(
     "%s %s %s",
@@ -38,18 +43,27 @@ Alternatively, there are ways to get access to the "real" mathematical values of
 Some expressions might not be used particularly well for lua however.
 **** Use result as a number
 #+begin_src lua
-local calculator = require("qalculate").new { }
+local calculator = require("qalculate").new()
 
 -- calculate the cumulative probability in an interval
 local mu = 150
-local sigma = 0.4
-local a = 150
-local b = 155
+local sigma = 8.4
+local a = 0
+local b = 140
 local expr = ([[ integrate(normdist(x, %f, %f), %f, %f) ]]):format(mu, sigma, a, b)
 
 local result = calculator:eval(expr)
 print("Expr: " .. result:source())
 print("Type: " .. result:type())
 print("Value: " .. result:value())
+#+end_src
+
+**** Plot Data
+#+begin_src lua
+local calculator = require("qalculate").new(function(x, y)
+    print(#x)
+end)
+
+print({calculator:eval("plot(sin x, 0, 10, pi/1024)")})
 #+end_src
 

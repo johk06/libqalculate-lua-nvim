@@ -18,7 +18,14 @@ error("Cannot require a meta file")
 ---@field base QalcBase?
 ---@field mode "default"|"rpn"
 
----@alias QalcPlotHandler fun(x: number[], y: number[])
+---@class QalcPlotMeta
+---@field step number?
+---@field xmft string?
+---@field type string?
+---@field range {[1]: number, [2]: number}?
+---@field extra string[]
+
+---@alias QalcPlotHandler fun(x: number[], y: number[], opts: QalcPlotMeta)
 
 ---@class Qalculate
 ---@field new fun(plot: QalcPlotHandler?): QalcCalculator
@@ -28,7 +35,7 @@ error("Cannot require a meta file")
 ---@class QalcCalculator
 ---@field eval fun(self: QalcCalculator, expr: string, parse_opts: QalcParseOptions?, allow_assingment: boolean?): QalcExpression, QalcMessages?
 ---@field plot fun(self: QalcCalculator, expr: string, min: QalcInput, max: QalcInput, step: QalcInput, parse_opts: QalcParseOptions?): number[]
----@field reset fun(self: QalcCalculator, variables: boolean, functions: boolean)
+---@field reset fun(self: QalcCalculator, variables: boolean)
 ---@field get fun(self: QalcCalculator, name: string): QalcExpression
 ---@field set fun(self: QalcCalculator, name: string, value: QalcInput): boolean
 

@@ -10,18 +10,12 @@
 #include <limits>
 #include <lua5.1/lua.hpp>
 
+
+#include "util.hpp"
 #include "function.hpp"
 #include "opttbl.hpp"
 
 auto constexpr infini = std::numeric_limits<double>::infinity();
-
-static inline void push_cppstr(lua_State* L, const std::string& str) { lua_pushlstring(L, str.data(), str.size()); }
-
-static inline std::string check_cppstr(lua_State* L, int index) {
-    size_t len;
-    const char* str = luaL_checklstring(L, index, &len);
-    return std::string(str, len);
-}
 
 struct LMathStructure {
     MathStructure* expr;
@@ -275,11 +269,8 @@ int l_calc_setvar(lua_State* L) {
 int l_calc_reset(lua_State* L) {
     LCalculator* self = check_Calculator(L, 1);
     bool variables = lua_toboolean(L, 2);
-    bool functions = lua_toboolean(L, 3);
     if (variables)
         self->calc->resetVariables();
-    if (functions)
-        self->calc->resetFunctions();
 
     return 0;
 }
