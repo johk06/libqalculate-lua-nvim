@@ -1,5 +1,7 @@
+#include <cstdlib>
 #include <libqalculate/Calculator.h>
 #include <libqalculate/ExpressionItem.h>
+#include <libqalculate/Function.h>
 #include <libqalculate/MathStructure.h>
 #include <libqalculate/Number.h>
 #include <libqalculate/Unit.h>
@@ -7,6 +9,9 @@
 #include <libqalculate/includes.h>
 #include <limits>
 #include <lua5.1/lua.hpp>
+
+#include "function.hpp"
+#include "opttbl.hpp"
 
 auto constexpr infini = std::numeric_limits<double>::infinity();
 
@@ -22,6 +27,11 @@ struct LMathStructure {
     MathStructure* expr;
     MathStructure* parsed_src; // nullable
     Calculator* calc;
+};
+
+struct LCalculator {
+    Calculator* calc;
+    int table_index;
 };
 
 static MathStructure check_MathValue(Calculator* calc, lua_State* L, int index) {
@@ -40,139 +50,12 @@ static MathStructure check_MathValue(Calculator* calc, lua_State* L, int index) 
     }
 }
 
-static Calculator* check_Calculator(lua_State* L, int index) {
-    return (Calculator*)luaL_checkudata(L, index, "QalcCalculator");
+static LCalculator* check_Calculator(lua_State* L, int index) {
+    return (LCalculator*)luaL_checkudata(L, index, "QalcCalculator");
 }
 
 static LMathStructure* check_MathStructure(lua_State* L, int index) {
     return (LMathStructure*)luaL_checkudata(L, index, "QalcExpression");
-}
-
-static void opt_getbase(lua_State* L, int index, int* dest) {
-    lua_getfield(L, index, "base");
-    int type = lua_type(L, -1);
-    if (type == LUA_TNUMBER) {
-        *dest = lua_tointeger(L, -1);
-    } else if (type == LUA_TSTRING) {
-        size_t len;
-        const char* buf = lua_tolstring(L, -1, &len);
-        std::string str(buf, len);
-
-        if (str == "roman") {
-            *dest = BASE_ROMAN_NUMERALS;
-        } else if (str == "time") {
-            *dest = BASE_TIME;
-        }
-    }
-}
-
-static inline void opt_getboolean(lua_State* L, int index, bool* dest, char const* field) {
-    lua_getfield(L, index, field);
-    if (lua_type(L, -1) == LUA_TNIL) {
-        lua_remove(L, -1);
-    } else {
-        *dest = lua_toboolean(L, -1);
-    }
-}
-
-static inline void opt_getinteger(lua_State* L, int index, int* dest, char const* field) {
-    lua_getfield(L, index, field);
-    if (lua_type(L, -1) == LUA_TNIL) {
-        lua_remove(L, -1);
-    } else {
-        *dest = lua_tointeger(L, -1);
-    }
-}
-
-static inline void opt_getstring(lua_State* L, int index, std::string* dest, char const* field) {
-    lua_getfield(L, index, field);
-    if (lua_type(L, -1) != LUA_TSTRING) {
-        lua_remove(L, -1);
-    } else {
-        size_t len;
-        const char* buf = lua_tolstring(L, -1, &len);
-        *dest = std::string(buf, len);
-    }
-}
-
-struct EnumPair {
-    const char* key;
-    int value;
-};
-
-static inline void opt_getenum(lua_State* L, int index, int* dest, char const* field, EnumPair const keys[]) {
-    lua_getfield(L, index, field);
-    if (lua_type(L, -1) != LUA_TSTRING) {
-        lua_remove(L, -1);
-    } else {
-        const char* key = lua_tostring(L, -1);
-
-        int i = 0;
-        while (keys[i].key) {
-            if (strcmp(keys[i].key, key) == 0) {
-                *dest = keys[i].value;
-            }
-            i++;
-        }
-    }
-}
-
-const EnumPair interval_display_options[] = {
-    {"adaptive", -1},
-    {"significant", INTERVAL_DISPLAY_SIGNIFICANT_DIGITS},
-    {"interval", INTERVAL_DISPLAY_INTERVAL},
-    {"plusminus", INTERVAL_DISPLAY_PLUSMINUS},
-    {"midpoint", INTERVAL_DISPLAY_MIDPOINT},
-    {"lower", INTERVAL_DISPLAY_LOWER},
-    {"upper", INTERVAL_DISPLAY_UPPER},
-    {"concise", INTERVAL_DISPLAY_CONCISE},
-    {"relative", INTERVAL_DISPLAY_RELATIVE},
-    {NULL},
-};
-const EnumPair unicode_sign_options[] = {
-    {"on", true},
-    {"off", false},
-    {"no-exponent", UNICODE_SIGNS_WITHOUT_EXPONENTS},
-    {NULL},
-};
-static PrintOptions check_PrintOptions(lua_State* L, int index) {
-    PrintOptions ret = default_print_options;
-    if (lua_type(L, index) != LUA_TTABLE) {
-        return ret;
-    }
-
-    opt_getbase(L, index, &ret.base);
-    opt_getinteger(L, index, &ret.min_decimals, "min_decimals");
-    opt_getinteger(L, index, &ret.max_decimals, "max_decimals");
-
-    opt_getboolean(L, index, &ret.abbreviate_names, "abbreviate_names");
-    opt_getboolean(L, index, &ret.negative_exponents, "negative_exponents");
-    opt_getboolean(L, index, &ret.spacious, "spacious");
-    opt_getboolean(L, index, &ret.excessive_parenthesis, "excessive_parenthesis");
-
-    opt_getenum(L, index, &ret.use_unicode_signs, "unicode", unicode_sign_options);
-    opt_getenum(L, index, (int*)&ret.interval_display, "interval_display", interval_display_options);
-
-    return ret;
-};
-
-EnumPair parsing_mode_options[] = {
-    {"default", PARSING_MODE_ADAPTIVE},
-    {"rpn", PARSING_MODE_RPN},
-    {NULL},
-};
-
-static ParseOptions check_ParseOptions(lua_State* L, int index) {
-    ParseOptions ret = default_parse_options;
-    if (lua_type(L, index) != LUA_TTABLE) {
-        return ret;
-    }
-
-    opt_getbase(L, index, &ret.base);
-
-    opt_getenum(L, index, (int*)&ret.parsing_mode, "mode", parsing_mode_options);
-
-    return ret;
 }
 
 const std::string type_names[] = {
@@ -273,16 +156,24 @@ static int push_messages(lua_State* L, Calculator* calc) {
 }
 
 extern "C" {
-#include <lua5.1/lauxlib.h>
 #include <lua5.1/lua.h>
+#include <lua5.1/lauxlib.h>
 
 int l_calc_new(lua_State* L) {
-    void* mem = lua_newuserdata(L, sizeof(Calculator));
-    Calculator* calc = new (mem) Calculator;
+    LCalculator* udata = (LCalculator*)lua_newuserdata(L, sizeof(LCalculator));
+    Calculator* calc = new Calculator;
+    udata->calc = calc;
 
     calc->loadExchangeRates();
     calc->loadGlobalDefinitions();
     calc->loadLocalDefinitions();
+
+    lua_newtable(L);
+    int table_index = luaL_ref(L, LUA_REGISTRYINDEX);
+    udata->table_index = table_index;
+
+    // MathFunction* func = calc->addFunction(new ReturnPlotFunction());
+    // calc->f_plot = NULL;
 
     luaL_getmetatable(L, "QalcCalculator");
     lua_setmetatable(L, -2);
@@ -290,13 +181,15 @@ int l_calc_new(lua_State* L) {
 }
 
 int l_calc_gc(lua_State* L) {
-    Calculator* calc = check_Calculator(L, 1);
-    calc->~Calculator();
+    LCalculator* self = check_Calculator(L, 1);
+    // FIXME: find out why this leads to a double free
+    // as far as I can see, nothing in my code should be the cause
+    // delete self->calc;
     return 0;
 }
 
 int l_calc_eval(lua_State* L) {
-    Calculator* calc = check_Calculator(L, 1);
+    LCalculator* self = check_Calculator(L, 1);
     auto expr = check_cppstr(L, 2);
     ParseOptions opts = check_ParseOptions(L, 3);
     EvaluationOptions eopts = default_evaluation_options;
@@ -311,25 +204,25 @@ int l_calc_eval(lua_State* L) {
     luaL_getmetatable(L, "QalcExpression");
     lua_setmetatable(L, -2);
 
-    res->calc = calc;
+    res->calc = self->calc;
     res->expr = new MathStructure;
     res->parsed_src = new MathStructure;
-    *res->expr = calc->calculate(expr, eopts, res->parsed_src);
+    *res->expr = self->calc->calculate(expr, eopts, res->parsed_src);
 
-    return 1 + push_messages(L, calc);
+    return 1 + push_messages(L, self->calc);
 }
 
 int l_calc_get_plot_values(lua_State* L) {
-    Calculator* calc = check_Calculator(L, 1);
+    LCalculator* self = check_Calculator(L, 1);
 
     std::string code = check_cppstr(L, 2);
 
-    MathStructure min = check_MathValue(calc, L, 3);
-    MathStructure max = check_MathValue(calc, L, 4);
-    MathStructure step = check_MathValue(calc, L, 5);
+    MathStructure min = check_MathValue(self->calc, L, 3);
+    MathStructure max = check_MathValue(self->calc, L, 4);
+    MathStructure step = check_MathValue(self->calc, L, 5);
     ParseOptions opts = check_ParseOptions(L, 6);
 
-    MathStructure expr = calc->parse(code, opts);
+    MathStructure expr = self->calc->parse(code, opts);
 
     min.eval();
     max.eval();
@@ -343,7 +236,7 @@ int l_calc_get_plot_values(lua_State* L) {
     }
 
     MathStructure x_value(min);
-    MathStructure x_var = calc->v_x;
+    MathStructure x_var = self->calc->v_x;
     MathStructure y_value;
 
     double maxvalue = max.number().floatValue();
@@ -369,10 +262,10 @@ int l_calc_get_plot_values(lua_State* L) {
 }
 
 int l_calc_getvar(lua_State* L) {
-    Calculator* self = check_Calculator(L, 1);
+    LCalculator* self = check_Calculator(L, 1);
     std::string name = check_cppstr(L, 2);
 
-    Variable* var = self->getActiveVariable(name);
+    Variable* var = self->calc->getActiveVariable(name);
     if (!var) {
         lua_pushnil(L);
     } else {
@@ -380,7 +273,7 @@ int l_calc_getvar(lua_State* L) {
         luaL_getmetatable(L, "QalcExpression");
         lua_setmetatable(L, -2);
 
-        res->calc = self;
+        res->calc = self->calc;
         MathStructure* expr = new MathStructure(var);
         expr->eval();
         res->expr = expr;
@@ -391,16 +284,16 @@ int l_calc_getvar(lua_State* L) {
 }
 
 int l_calc_setvar(lua_State* L) {
-    Calculator* self = check_Calculator(L, 1);
+    LCalculator* self = check_Calculator(L, 1);
     std::string name = check_cppstr(L, 2);
-    MathStructure val = check_MathValue(self, L, 3);
+    MathStructure val = check_MathValue(self->calc, L, 3);
 
-    Variable* var = self->getVariable(name);
+    Variable* var = self->calc->getVariable(name);
     if (!var) {
         KnownVariable* v = new KnownVariable();
         v->setName(name);
         v->set(val);
-        self->addVariable(v);
+        self->calc->addVariable(v);
         lua_pushboolean(L, true);
     } else if (var->isKnown()) {
         KnownVariable* v = (KnownVariable*)var;
@@ -413,13 +306,13 @@ int l_calc_setvar(lua_State* L) {
 }
 
 int l_calc_reset(lua_State* L) {
-    Calculator* self = check_Calculator(L, 1);
+    LCalculator* self = check_Calculator(L, 1);
     bool variables = lua_toboolean(L, 2);
     bool functions = lua_toboolean(L, 3);
     if (variables)
-        self->resetVariables();
+        self->calc->resetVariables();
     if (functions)
-        self->resetFunctions();
+        self->calc->resetFunctions();
 
     return 0;
 }
