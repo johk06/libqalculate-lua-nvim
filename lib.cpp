@@ -159,8 +159,8 @@ int QALC_CURRENT_PLOT_HANDLER = 0;
 lua_State* QALC_CURRENT_LUA_STATE = NULL;
 
 extern "C" {
-#include <lua5.1/lua.h>
 #include <lua5.1/lauxlib.h>
+#include <lua5.1/lua.h>
 
 int l_calc_new(lua_State* L) {
     int funcref = 0;
@@ -188,6 +188,9 @@ int l_calc_new(lua_State* L) {
 
 int l_calc_gc(lua_State* L) {
     LCalculator* self = check_Calculator(L, 1);
+    if (self->plot_function) {
+        luaL_unref(L, LUA_REGISTRYINDEX, self->plot_function);
+    }
     // FIXME: find out why this leads to a double free
     // as far as I can see, nothing in my code should be the cause
     // delete self->calc;
@@ -377,54 +380,33 @@ int luaopen_qalculate_qalc(lua_State* L) {
     lua_pushvalue(L, -1);
     lua_setfield(L, -2, "__index");
 
-    lua_pushcfunction(L, l_calc_gc);
-    lua_setfield(L, -2, "__gc");
-
-    lua_pushcfunction(L, l_calc_eval);
-    lua_setfield(L, -2, "eval");
-
-    lua_pushcfunction(L, l_calc_getvar);
-    lua_setfield(L, -2, "get");
-
-    lua_pushcfunction(L, l_calc_setvar);
-    lua_setfield(L, -2, "set");
-
-    lua_pushcfunction(L, l_calc_reset);
-    lua_setfield(L, -2, "reset");
+    const luaL_Reg calculator_mt[] = {{"__gc", l_calc_gc},    {"eval", l_calc_eval},   {"get", l_calc_getvar},
+                                      {"set", l_calc_setvar}, {"reset", l_calc_reset}, {NULL}};
+    luaL_register(L, NULL, calculator_mt);
 
     luaL_newmetatable(L, "QalcExpression");
     lua_pushvalue(L, -1);
     lua_setfield(L, -2, "__index");
 
-    lua_pushcfunction(L, l_expr_gc);
-    lua_setfield(L, -2, "__gc");
+    const luaL_Reg expression_mt[] = {
+        {"__gc", l_expr_gc},
+        {"__tostring", l_expr_tostring},
+        {"print", l_expr_tostring},
+        {"value", l_expr_tolua},
+        {"type", l_expr_type},
+        {"source", l_expr_source},
+        {"is_approximate", l_expr_is_approximate},
+        {"as_matrix", l_expr_as_matrix},
+        {NULL},
+    };
+    luaL_register(L, NULL, expression_mt);
 
-    lua_pushcfunction(L, l_expr_tostring);
-    lua_setfield(L, -2, "__tostring");
-
-    lua_pushcfunction(L, l_expr_tostring);
-    lua_setfield(L, -2, "print");
-
-    lua_pushcfunction(L, l_expr_tolua);
-    lua_setfield(L, -2, "value");
-
-    lua_pushcfunction(L, l_expr_type);
-    lua_setfield(L, -2, "type");
-
-    lua_pushcfunction(L, l_expr_source);
-    lua_setfield(L, -2, "source");
-
-    lua_pushcfunction(L, l_expr_is_approximate);
-    lua_setfield(L, -2, "is_approximate");
-
-    lua_pushcfunction(L, l_expr_as_matrix);
-    lua_setfield(L, -2, "as_matrix");
-
-    static luaL_Reg const library[] = {
+    lua_newtable(L);
+    const luaL_Reg library[] = {
         {"new", l_calc_new},
         {NULL, NULL},
     };
-    luaL_register(L, "qalc", library);
+    luaL_register(L, NULL, library);
 
     return 1;
 }
